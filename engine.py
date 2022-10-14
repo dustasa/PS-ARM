@@ -1,5 +1,6 @@
 import math
 import sys
+import os
 from copy import deepcopy
 
 import torch
@@ -18,9 +19,9 @@ def to_device(images, targets, device):
     return images, targets
 
 
-def train_one_epoch(cfg, model, optimizer, data_loader, device, epoch, tfboard=None):
+def train_one_epoch(cfg, model, optimizer, data_loader, device, epoch, tfboard=None, outsys_dir=None):
     model.train()
-    metric_logger = MetricLogger(delimiter="  ")
+    metric_logger = MetricLogger(delimiter="  ", txt_dir=os.path.join(outsys_dir, 'os.txt'))
     metric_logger.add_meter("lr", SmoothedValue(window_size=1, fmt="{value:.6f}"))
     header = "Epoch: [{}]".format(epoch)
 
@@ -32,7 +33,7 @@ def train_one_epoch(cfg, model, optimizer, data_loader, device, epoch, tfboard=N
         warmup_scheduler = warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
 
     for i, (images, targets) in enumerate(
-        metric_logger.log_every(data_loader, cfg.DISP_PERIOD, header)
+            metric_logger.log_every(data_loader, cfg.DISP_PERIOD, header)
     ):
         images, targets = to_device(images, targets, device)
 
@@ -47,6 +48,10 @@ def train_one_epoch(cfg, model, optimizer, data_loader, device, epoch, tfboard=N
         if not math.isfinite(loss_value):
             print(f"Loss is {loss_value}, stopping training")
             print(loss_dict_reduced)
+
+            write_text("Loss is {}, stopping training".format(loss_value), fpath=os.path.join(outsys_dir, 'os.txt'))
+            write_text(loss_dict_reduced, fpath=os.path.join(outsys_dir, 'os.txt'))
+
             sys.exit(1)
 
         optimizer.zero_grad()
@@ -68,7 +73,7 @@ def train_one_epoch(cfg, model, optimizer, data_loader, device, epoch, tfboard=N
 
 @torch.no_grad()
 def evaluate_performance(
-    model, gallery_loader, query_loader, device, use_gt=False, use_cache=False, use_cbgm=False
+        model, gallery_loader, query_loader, device, use_gt=False, use_cache=False, use_cbgm=False, outsys_dir=None
 ):
     """
     Args:
@@ -80,7 +85,7 @@ def evaluate_performance(
     """
     model.eval()
     if use_cache:
-        eval_cache = torch.load("data/eval_cache/eval_cache.pth")
+        eval_cache = torch.load(os.path.join(outsys_dir, "eval_cache/eval_cache.pth"))
         gallery_dets = eval_cache["gallery_dets"]
         gallery_feats = eval_cache["gallery_feats"]
         query_dets = eval_cache["query_dets"]
@@ -137,7 +142,8 @@ def evaluate_performance(
             assert len(embeddings) == 1, "batch size in test phase should be 1"
             query_box_feats.append(embeddings[0].cpu().numpy())
 
-        mkdir("data/eval_cache")
+        cache_dir = os.path.join(outsys_dir, "eval_cache")
+        mkdir(cache_dir)
         save_dict = {
             "gallery_dets": gallery_dets,
             "gallery_feats": gallery_feats,
@@ -145,13 +151,14 @@ def evaluate_performance(
             "query_feats": query_feats,
             "query_box_feats": query_box_feats,
         }
-        torch.save(save_dict, "data/eval_cache/eval_cache.pth")
+        torch.save(save_dict, os.path.join(cache_dir, "eval_cache.pth"))
 
-    eval_detection(gallery_loader.dataset, gallery_dets, det_thresh=0.01)
+    if not use_gt:
+        eval_detection(gallery_loader.dataset, gallery_dets, det_thresh=0.01, outsys_dir=outsys_dir)
     eval_search_func = (
         eval_search_cuhk if gallery_loader.dataset.name == "CUHK-SYSU" else eval_search_prw
     )
-    eval_search_func(
+    ret = eval_search_func(
         gallery_loader.dataset,
         query_loader.dataset,
         gallery_dets,
@@ -160,4 +167,6 @@ def evaluate_performance(
         query_dets,
         query_feats,
         cbgm=use_cbgm,
+        outsys_dir=outsys_dir,
     )
+    return ret

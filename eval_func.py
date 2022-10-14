@@ -1,11 +1,13 @@
+import os
 import os.path as osp
+import sys
 
 import numpy as np
 from scipy.io import loadmat
 from sklearn.metrics import average_precision_score
 
 from utils.km import run_kuhn_munkres
-from utils.utils import write_json
+from utils.utils import write_json, write_text
 
 
 def _compute_iou(a, b):
@@ -19,7 +21,8 @@ def _compute_iou(a, b):
 
 
 def eval_detection(
-    gallery_dataset, gallery_dets, det_thresh=0.5, iou_thresh=0.5, labeled_only=False
+        gallery_dataset, gallery_dets, det_thresh=0.5, iou_thresh=0.5, labeled_only=False,
+        outsys_dir=None
 ):
     """
     gallery_det (list of ndarray): n_det x [x1, y1, x2, y2, score] per image
@@ -79,26 +82,35 @@ def eval_detection(
     det_rate = count_tp * 1.0 / count_gt
     ap = average_precision_score(y_true, y_score) * det_rate
 
-    print("{} detection:".format("labeled only" if labeled_only else "all"))
-    print("  recall = {:.2%}".format(det_rate))
-    if not labeled_only:
-        print("  ap = {:.2%}".format(ap))
+    # print("{} detection:".format("labeled only" if labeled_only else "all"))
+    # print("  recall = {:.2%}".format(det_rate))
+    # if not labeled_only:
+    #     print("  ap = {:.2%}".format(ap))
+
+    if outsys_dir is not None:
+        write_text(sentence="{} detection:".format("labeled only" if labeled_only else "all"),
+                   fpath=os.path.join(outsys_dir, 'os.txt'))
+        write_text(sentence="  recall = {:.2%}".format(det_rate), fpath=os.path.join(outsys_dir, 'os.txt'))
+        if not labeled_only:
+            write_text(sentence="  ap = {:.2%}".format(ap), fpath=os.path.join(outsys_dir, 'os.txt'))
+
     return det_rate, ap
 
 
 def eval_search_cuhk(
-    gallery_dataset,
-    query_dataset,
-    gallery_dets,
-    gallery_feats,
-    query_box_feats,
-    query_dets,
-    query_feats,
-    k1=10,
-    k2=3,
-    det_thresh=0.5,
-    cbgm=False,
-    gallery_size=100,
+        gallery_dataset,
+        query_dataset,
+        gallery_dets,
+        gallery_feats,
+        query_box_feats,
+        query_dets,
+        query_feats,
+        k1=10,
+        k2=3,
+        det_thresh=0.5,
+        cbgm=False,
+        gallery_size=100,
+        outsys_dir=None
 ):
     """
     gallery_dataset/query_dataset: an instance of BaseDataset
@@ -211,8 +223,8 @@ def eval_search_cuhk(
                 qboxes = query_dets[i][:k2]
                 qfeats = query_feats[i][:k2]
                 assert (
-                    query_roi - qboxes[0][:4]
-                ).sum() <= 0.001, "query_roi must be the first one in pboxes"
+                               query_roi - qboxes[0][:4]
+                       ).sum() <= 0.001, "query_roi must be the first one in pboxes"
 
                 # build the bipartite graph and run Kuhn-Munkres (K-M) algorithm
                 # to find the best match
@@ -268,6 +280,7 @@ def eval_search_cuhk(
             "query_img": str(query_imname),
             "query_roi": list(map(float, list(query_roi))),
             "query_gt": query_gt,
+            "aps": ap,
             "gallery": [],
         }
         # only record wrong results
@@ -285,13 +298,19 @@ def eval_search_cuhk(
             )
         ret["results"].append(new_entry)
 
-    print("search ranking:")
-    print("  mAP = {:.2%}".format(np.mean(aps)))
+    # print("search ranking:")
+    # print("  mAP = {:.2%}".format(np.mean(aps)))
     accs = np.mean(accs, axis=0)
-    for i, k in enumerate(topk):
-        print("  top-{:2d} = {:.2%}".format(k, accs[i]))
+    # for i, k in enumerate(topk):
+    #     print("  top-{:2d} = {:.2%}".format(k, accs[i]))
 
-    write_json(ret, "vis/results.json")
+    # write_json(ret, os.path.join(outsys_dir, "results.json"))
+
+    if outsys_dir is not None:
+        write_text(sentence="search ranking:", fpath=os.path.join(outsys_dir, 'os.txt'))
+        write_text(sentence="  mAP = {:.2%}".format(np.mean(aps)), fpath=os.path.join(outsys_dir, 'os.txt'))
+        for i, k in enumerate(topk):
+            write_text("  top-{:2d} = {:.2%}".format(k, accs[i]), fpath=os.path.join(outsys_dir, 'os.txt'))
 
     ret["mAP"] = np.mean(aps)
     ret["accs"] = accs
@@ -299,18 +318,19 @@ def eval_search_cuhk(
 
 
 def eval_search_prw(
-    gallery_dataset,
-    query_dataset,
-    gallery_dets,
-    gallery_feats,
-    query_box_feats,
-    query_dets,
-    query_feats,
-    k1=30,
-    k2=4,
-    det_thresh=0.5,
-    cbgm=False,
-    ignore_cam_id=True,
+        gallery_dataset,
+        query_dataset,
+        gallery_dets,
+        gallery_feats,
+        query_box_feats,
+        query_dets,
+        query_feats,
+        k1=30,
+        k2=4,
+        det_thresh=0.5,
+        cbgm=False,
+        ignore_cam_id=True,
+        outsys_dir=None
 ):
     """
     gallery_det (list of ndarray): n_det x [x1, x2, y1, y2, score] per image
@@ -406,8 +426,8 @@ def eval_search_prw(
                 qboxes = query_dets[i][:k2]
                 qfeats = query_feats[i][:k2]
                 assert (
-                    query_roi - qboxes[0][:4]
-                ).sum() <= 0.001, "query_roi must be the first one in pboxes"
+                               query_roi - qboxes[0][:4]
+                       ).sum() <= 0.001, "query_roi must be the first one in pboxes"
 
                 graph = []
                 for indx_i, pfeat in enumerate(qfeats):
@@ -458,6 +478,7 @@ def eval_search_prw(
             "query_roi": list(map(float, list(query_roi.squeeze()))),
             "query_gt": query_gts,
             "gallery": [],
+            "aps": float(ap),
         }
         # only save top-10 predictions
         for k in range(10):
@@ -471,12 +492,15 @@ def eval_search_prw(
             )
         ret["results"].append(new_entry)
 
-    print("search ranking:")
+    # print("search ranking:")
+    write_text(sentence="search ranking:", fpath=os.path.join(outsys_dir, 'os.txt'))
     mAP = np.mean(aps)
-    print("  mAP = {:.2%}".format(mAP))
+    # print("  mAP = {:.2%}".format(mAP))
+    write_text(sentence="  mAP = {:.2%}".format(mAP), fpath=os.path.join(outsys_dir, 'os.txt'))
     accs = np.mean(accs, axis=0)
     for i, k in enumerate(topk):
-        print("  top-{:2d} = {:.2%}".format(k, accs[i]))
+        # print("  top-{:2d} = {:.2%}".format(k, accs[i]))
+        write_text(sentence="  top-{:2d} = {:.2%}".format(k, accs[i]), fpath=os.path.join(outsys_dir, 'os.txt'))
 
     # write_json(ret, "vis/results.json")
 

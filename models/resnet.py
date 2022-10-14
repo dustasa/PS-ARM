@@ -17,7 +17,7 @@ from torch.nn.modules.utils import _pair
 
 
 class SimAM(torch.nn.Module):
-    def __init__(self, channels = None, e_lambda = 1e-4):
+    def __init__(self, channels=None, e_lambda=1e-4):
         super(SimAM, self).__init__()
 
         self.activaton = nn.Sigmoid()
@@ -33,22 +33,24 @@ class SimAM(torch.nn.Module):
         return "simam"
 
     def forward(self, x):
-
         b, c, h, w = x.size()
-        
+
         n = w * h - 1
 
-        x_minus_mu_square = (x - x.mean(dim=[2,3], keepdim=True)).pow(2)
-        y = x_minus_mu_square / (4 * (x_minus_mu_square.sum(dim=[2,3], keepdim=True) / n + self.e_lambda)) + 0.5
+        x_minus_mu_square = (x - x.mean(dim=[2, 3], keepdim=True)).pow(2)
+        y = x_minus_mu_square / (4 * (x_minus_mu_square.sum(dim=[2, 3], keepdim=True) / n + self.e_lambda)) + 0.5
 
         return x * self.activaton(y)
-    
+
+
 class BasicConv(nn.Module):
-    def __init__(self, in_planes, out_planes, kernel_size, stride=1, padding=0, dilation=1, groups=1, relu=True, bn=True, bias=False):
+    def __init__(self, in_planes, out_planes, kernel_size, stride=1, padding=0, dilation=1, groups=1, relu=True,
+                 bn=True, bias=False):
         super(BasicConv, self).__init__()
         self.out_channels = out_planes
-        self.conv = nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride, padding=padding, dilation=dilation, groups=groups, bias=bias)
-        self.bn = nn.BatchNorm2d(out_planes,eps=1e-5, momentum=0.01, affine=True) if bn else None
+        self.conv = nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride, padding=padding,
+                              dilation=dilation, groups=groups, bias=bias)
+        self.bn = nn.BatchNorm2d(out_planes, eps=1e-5, momentum=0.01, affine=True) if bn else None
         self.relu = nn.ReLU() if relu else None
 
     def forward(self, x):
@@ -59,9 +61,11 @@ class BasicConv(nn.Module):
             x = self.relu(x)
         return x
 
+
 class Flatten(nn.Module):
     def forward(self, x):
         return x.view(x.size(0), -1)
+
 
 class ChannelGate(nn.Module):
     def __init__(self, gate_channels, reduction_ratio=16, pool_types=['avg', 'max']):
@@ -72,32 +76,34 @@ class ChannelGate(nn.Module):
             nn.Linear(gate_channels, gate_channels // reduction_ratio),
             nn.ReLU(),
             nn.Linear(gate_channels // reduction_ratio, gate_channels)
-            )
+        )
         self.pool_types = pool_types
+
     def forward(self, x):
         channel_att_sum = None
         for pool_type in self.pool_types:
-            if pool_type=='avg':
-                avg_pool = F.avg_pool2d( x, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3)))
-                channel_att_raw = self.mlp( avg_pool )
-            elif pool_type=='max':
-                max_pool = F.max_pool2d( x, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3)))
-                channel_att_raw = self.mlp( max_pool )
-            elif pool_type=='lp':
-                lp_pool = F.lp_pool2d( x, 2, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3)))
-                channel_att_raw = self.mlp( lp_pool )
-            elif pool_type=='lse':
+            if pool_type == 'avg':
+                avg_pool = F.avg_pool2d(x, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3)))
+                channel_att_raw = self.mlp(avg_pool)
+            elif pool_type == 'max':
+                max_pool = F.max_pool2d(x, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3)))
+                channel_att_raw = self.mlp(max_pool)
+            elif pool_type == 'lp':
+                lp_pool = F.lp_pool2d(x, 2, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3)))
+                channel_att_raw = self.mlp(lp_pool)
+            elif pool_type == 'lse':
                 # LSE pool only
                 lse_pool = logsumexp_2d(x)
-                channel_att_raw = self.mlp( lse_pool )
+                channel_att_raw = self.mlp(lse_pool)
 
             if channel_att_sum is None:
                 channel_att_sum = channel_att_raw
             else:
                 channel_att_sum = channel_att_sum + channel_att_raw
 
-        scale = F.sigmoid( channel_att_sum ).unsqueeze(2).unsqueeze(3).expand_as(x)
+        scale = F.sigmoid(channel_att_sum).unsqueeze(2).unsqueeze(3).expand_as(x)
         return x * scale
+
 
 def logsumexp_2d(tensor):
     tensor_flatten = tensor.view(tensor.size(0), tensor.size(1), -1)
@@ -105,20 +111,23 @@ def logsumexp_2d(tensor):
     outputs = s + (tensor_flatten - s).exp().sum(dim=2, keepdim=True).log()
     return outputs
 
+
 class ChannelPool(nn.Module):
     def forward(self, x):
-        return torch.cat( (torch.max(x,1)[0].unsqueeze(1), torch.mean(x,1).unsqueeze(1)), dim=1 )
+        return torch.cat((torch.max(x, 1)[0].unsqueeze(1), torch.mean(x, 1).unsqueeze(1)), dim=1)
+
 
 class SpatialGate(nn.Module):
     def __init__(self):
         super(SpatialGate, self).__init__()
         kernel_size = 7
         self.compress = ChannelPool()
-        self.spatial = BasicConv(2, 1, kernel_size, stride=1, padding=(kernel_size-1) // 2, relu=False)
+        self.spatial = BasicConv(2, 1, kernel_size, stride=1, padding=(kernel_size - 1) // 2, relu=False)
+
     def forward(self, x):
         x_compress = self.compress(x)
         x_out = self.spatial(x_compress)
-        scale = F.sigmoid(x_out) # broadcasting
+        scale = F.sigmoid(x_out)  # broadcasting
         return x * scale
 
 
@@ -138,22 +147,22 @@ class MLP(nn.Module):
 
 
 class TokenMixer(nn.Module):
-    def __init__(self, num_features, image_size ,num_patches, expansion_factor, dropout):
+    def __init__(self, num_features, image_size, num_patches, expansion_factor, dropout):
         super().__init__()
         self.norm = nn.LayerNorm(num_features)
         self.mlp = MLP(num_patches, expansion_factor, dropout)
-        self.image_size = image_size        
+        self.image_size = image_size
         self.spatial_att = SpatialGate()
 
     def SpatialGate_forward(self, x):
-        residual =x 
+        residual = x
         BB, HH_WW, CC = x.shape
-        HH =  WW = int(math.sqrt(HH_WW))
+        HH = WW = int(math.sqrt(HH_WW))
         x = x.reshape(BB, CC, HH, WW)
         x = self.spatial_att(x)
         x = x.permute(0, 2, 3, 1)
         x = x.view(BB, -1, CC)
-        x = residual + x    
+        x = residual + x
         return x
 
     def forward(self, x):
@@ -175,18 +184,18 @@ class ChannelMixer(nn.Module):
         super().__init__()
         self.norm = nn.LayerNorm(num_features)
         self.mlp = MLP(num_features, expansion_factor, dropout)
-        self.image_size =image_size
+        self.image_size = image_size
         self.channel_att = ChannelGate(num_features, )
 
     def ChannelGate_forward(self, x):
-        residual =x 
+        residual = x
         BB, HH_WW, CC = x.shape
-        HH =  WW = int(math.sqrt(HH_WW))       
+        HH = WW = int(math.sqrt(HH_WW))
         x = x.reshape(BB, CC, HH, WW)
         x = self.channel_att(x)
         x = x.permute(0, 2, 3, 1)
         x = x.view(BB, -1, CC)
-        x = residual + x    
+        x = residual + x
         return x
 
     def forward(self, x):
@@ -227,90 +236,99 @@ def check_sizes(image_size, patch_size):
 
 class ARM_Mixer(nn.Module):
     def __init__(
-        self,
-        image_size=14,
-        patch_size=1,
-        in_channels=256,
-        num_features=256,
-        expansion_factor=3,        
-        dropout=0.5,
+            self,
+            image_size=14,
+            patch_size=1,
+            in_channels=256,
+            num_features=256,
+            expansion_factor=3,
+            dropout=0.5,
     ):
         num_patches = check_sizes(image_size, patch_size)
         super().__init__()
-        
+
         self.mixers = MixerLayer(num_patches, image_size, num_features, expansion_factor, dropout)
         self.simam = SimAM()
 
     def forward(self, x):
         residual = x
-        BB, CC, HH, WW= x.shape
+        BB, CC, HH, WW = x.shape
         patches = x.permute(0, 2, 3, 1)
         patches = patches.view(BB, -1, CC)
         # patches.shape == (batch_size, num_patches, num_features)
         embedding = self.mixers(patches)
-        
-        embedding_rearrange = embedding.reshape(BB, CC,HH,WW)
-        embedding_final = embedding_rearrange + self.simam(x)+x
+
+        embedding_rearrange = embedding.reshape(BB, CC, HH, WW)
+        embedding_final = embedding_rearrange + self.simam(x) + x
         return embedding_final
-    
+
 
 class Backbone(nn.Sequential):
     def __init__(self, resnet):
         super(Backbone, self).__init__()
         self.feature1 = nn.Sequential(resnet.conv1,
-                                  resnet.bn1, resnet.relu,resnet.maxpool)
-        self.layer1= nn.Sequential(resnet.layer1)
-        self.layer2= nn.Sequential(resnet.layer2)
-        self.layer3= nn.Sequential(resnet.layer3)
-                                  
+                                      resnet.bn1, resnet.relu, resnet.maxpool)
+        self.layer1 = nn.Sequential(resnet.layer1)
+        self.layer2 = nn.Sequential(resnet.layer2)
+        self.layer3 = nn.Sequential(resnet.layer3)
+
         self.out_channels = 1024
-        
+
     def forward(self, x):
         feat = self.feature1(x)
-        layer1=self.layer1(feat)
-        layer2=self.layer2(layer1)
-        layer3=self.layer3(layer2)
+        layer1 = self.layer1(feat)
+        layer2 = self.layer2(layer1)
+        layer3 = self.layer3(layer2)
 
         return OrderedDict([["feat_res4", layer3]])
 
 
-    
 class Res5Head(nn.Sequential):
     def __init__(self, resnet):
-        super(Res5Head, self).__init__()  
+        super(Res5Head, self).__init__()
         self.layer4 = nn.Sequential(resnet.layer4)  # res5
         self.out_channels = [1024, 2048]
-         
+
         self.mlP_model = ARM_Mixer(in_channels=256, image_size=14, patch_size=1)
-       
+
         self.qconv1 = nn.Conv2d(in_channels=1024, out_channels=256, kernel_size=1)
         self.qconv2 = nn.Conv2d(in_channels=256, out_channels=1024, kernel_size=1)
-       
-        
-                
+
     def forward(self, x):
         qconv1 = self.qconv1(x)
-        x_sc_mlp_feat=self.mlP_model(qconv1)
+        x_sc_mlp_feat = self.mlP_model(qconv1)
         qconv2 = self.qconv2(x_sc_mlp_feat)
-        
+
         layer5_feat = self.layer4(qconv2)
- 
-    
+
         x_feat = F.adaptive_max_pool2d(qconv2, 1)
 
         feat = F.adaptive_max_pool2d(layer5_feat, 1)
-        
+
         return OrderedDict([["feat_res4", x_feat], ["feat_res5", feat]])
-    
+
+
+# def build_resnet(name="resnet50", pretrained=True):
+#     from torchvision.models import resnet
+#     resnet.model_urls["resnet50"] = "https://download.pytorch.org/models/resnet50-f46c3f97.pth"
+#     # resnet.model_urls["resnet50"] = "/data/aosun/Desktop/code/git-repo/PS-ARM/pth/resnet50.pth"
+#     resnet_model = torchvision.models.resnet.__dict__[name](pretrained=pretrained)
+#     # resnet_model = resnet.resnet50(pretrained=True)
+#
+#     # freeze layers
+#     resnet_model.conv1.weight.requires_grad_(False)
+#     resnet_model.bn1.weight.requires_grad_(False)
+#     resnet_model.bn1.bias.requires_grad_(False)
+
+    # return Backbone(resnet_model), Res5Head(resnet_model)
 
 def build_resnet(name="resnet50", pretrained=True):
-    from torchvision.models import resnet
-    resnet.model_urls["resnet50"] = "https://download.pytorch.org/models/resnet50-f46c3f97.pth"
-    resnet_model = resnet.resnet50(pretrained=True)
+    # resnet = resnet50(pretrained=True)
+    resnet = torchvision.models.resnet.__dict__[name](pretrained=pretrained)
 
     # freeze layers
-    resnet_model.conv1.weight.requires_grad_(False)
-    resnet_model.bn1.weight.requires_grad_(False)
-    resnet_model.bn1.bias.requires_grad_(False)
+    resnet.conv1.weight.requires_grad_(False)
+    resnet.bn1.weight.requires_grad_(False)
+    resnet.bn1.bias.requires_grad_(False)
 
-    return Backbone(resnet_model), Res5Head(resnet_model)
+    return Backbone(resnet), Res5Head(resnet)

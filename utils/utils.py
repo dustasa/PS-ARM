@@ -6,12 +6,14 @@ import os.path as osp
 import pickle
 import random
 import time
+import sys
 from collections import defaultdict, deque
 
 import numpy as np
 import torch
 import torch.distributed as dist
 from tabulate import tabulate
+import datetime
 
 
 # -------------------------------------------------------- #
@@ -82,9 +84,10 @@ class SmoothedValue(object):
 
 
 class MetricLogger(object):
-    def __init__(self, delimiter="\t"):
+    def __init__(self, delimiter="\t", txt_dir=None):
         self.meters = defaultdict(SmoothedValue)
         self.delimiter = delimiter
+        self.txt_dir = txt_dir
 
     def update(self, **kwargs):
         for k, v in kwargs.items():
@@ -131,7 +134,7 @@ class MetricLogger(object):
                     "{meters}",
                     "time: {time}",
                     "data: {data}",
-                    "max mem: {memory:.0f}",
+                    "max mem: {memory:.2f}GB",
                 ]
             )
         else:
@@ -145,26 +148,24 @@ class MetricLogger(object):
                     "data: {data}",
                 ]
             )
-        MB = 1024.0 * 1024.0
+        GB = 1024.0 * 1024.0 * 1024.0
         for obj in iterable:
             data_time.update(time.time() - end)
             yield obj
             iter_time.update(time.time() - end)
-            if i % print_freq == 0 or i == len(iterable) - 1:
+            if i % print_freq == 0:
                 eta_seconds = iter_time.global_avg * (len(iterable) - i)
                 eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
                 if torch.cuda.is_available():
-                    print(
-                        log_msg.format(
-                            i,
-                            len(iterable),
-                            eta=eta_string,
-                            meters=str(self),
-                            time=str(iter_time),
-                            data=str(data_time),
-                            memory=torch.cuda.max_memory_allocated() / MB,
-                        )
-                    )
+                    write_text(log_msg.format(
+                        i,
+                        len(iterable),
+                        eta=eta_string,
+                        meters=str(self),
+                        time=str(iter_time),
+                        data=str(data_time),
+                        memory=torch.cuda.max_memory_allocated() / GB,
+                    ), self.txt_dir)
                 else:
                     print(
                         log_msg.format(
@@ -176,6 +177,15 @@ class MetricLogger(object):
                             data=str(data_time),
                         )
                     )
+                    write_text(log_msg.format(
+                        i,
+                        len(iterable),
+                        eta=eta_string,
+                        meters=str(self),
+                        time=str(iter_time),
+                        data=str(data_time),
+                        memory=torch.cuda.max_memory_allocated() / GB,
+                    ), self.txt_dir)
             i += 1
             end = time.time()
         total_time = time.time() - start_time
@@ -185,6 +195,11 @@ class MetricLogger(object):
                 header, total_time_str, total_time / len(iterable)
             )
         )
+
+
+def mkdir_if_missing(directory):
+    if not osp.exists(directory):
+        os.makedirs(directory)
 
 
 # -------------------------------------------------------- #
@@ -305,7 +320,7 @@ def is_main_process():
 
 def save_on_master(*args, **kwargs):
     if is_main_process():
-        torch.save(*args, **kwargs)
+        torch.save(*args, **kwargs, _use_new_zipfile_serialization=False)
 
 
 def init_distributed_mode(args):
@@ -367,6 +382,18 @@ def write_json(obj, fpath):
         json.dump(_obj, f, indent=4, separators=(",", ": "))
 
 
+def write_text(sentence, fpath, print_on=True):
+    d = datetime.datetime.now()
+    if isinstance(sentence, str):
+        f = open(fpath, 'a')
+        f.write("[{}]: ".format(d.strftime("%Y/%m/%d %H:%M:%S")) + sentence)
+        f.write('\n')
+        f.close()
+
+    if print_on:
+        print("[{}]: ".format(d.strftime("%Y/%m/%d %H:%M:%S")) + sentence)
+
+
 def symlink(src, dst, overwrite=True, **kwargs):
     if os.path.lexists(dst) and overwrite:
         os.remove(dst)
@@ -410,26 +437,25 @@ def warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor):
 
 
 def resume_from_ckpt(ckpt_path, model, optimizer=None, lr_scheduler=None):
-    ckpt = torch.load(ckpt_path ,map_location='cuda')
+    ckpt = torch.load(ckpt_path, map_location='cuda')
     epoch = 0
     if 'model' in ckpt.keys():
         model.load_state_dict(ckpt['model'], strict=False)
     else:
-        model.load_state_dict(ckpt, strict=False)    
-    
-    if 'optimizer' in ckpt.keys() and optimizer is not None:       
+        model.load_state_dict(ckpt, strict=False)
+
+    if 'optimizer' in ckpt.keys() and optimizer is not None:
         optimizer.load_state_dict(ckpt["optimizer"])
-        
-    
+
     if 'lr_scheduler' in ckpt.keys() and lr_scheduler is not None:
         lr_scheduler.load_state_dict(ckpt["lr_scheduler"])
-    
+
     if 'epoch' in ckpt.keys():
         epoch = ckpt['epoch']
         print(f"model was trained for {ckpt['epoch']} epochs")
-    
+
     print(f"loaded checkpoint {ckpt_path}")
-    
+    print(f"model was trained for {ckpt['epoch']} epochs")
     return epoch
 
 

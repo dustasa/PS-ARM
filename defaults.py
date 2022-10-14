@@ -6,8 +6,8 @@ _C = CN()
 #                           Input                          #
 # -------------------------------------------------------- #
 _C.INPUT = CN()
-_C.INPUT.DATASET = "CUHK-SYSU"
-_C.INPUT.DATA_ROOT = "data/CUHK-SYSU"
+_C.INPUT.DATASET = "PRW"
+_C.INPUT.DATA_ROOT = "data/PRW"
 
 # Size of the smallest side of the image
 _C.INPUT.MIN_SIZE = 900
@@ -141,6 +141,7 @@ _C.DISP_PERIOD = 100
 _C.TF_BOARD = True
 # The device loading the model
 _C.DEVICE = "cuda"
+_C.NVIDIA_DEVICE = 0
 # Set seed to negative to fully randomize everything
 _C.SEED = 1
 # Directory where output files are written

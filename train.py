@@ -1,5 +1,7 @@
+import sys
 import argparse
 import datetime
+import os
 import os.path as osp
 import time
 
@@ -11,6 +13,7 @@ from defaults import get_default_cfg
 from engine import evaluate_performance, train_one_epoch
 from models.arm_net import ARMNet
 from utils.utils import mkdir, resume_from_ckpt, save_on_master, set_random_seed
+from utils.utils import write_text
 
 
 def main(args):
@@ -20,14 +23,19 @@ def main(args):
     cfg.merge_from_list(args.opts)
     cfg.freeze()
 
+    output_dir = cfg.OUTPUT_DIR
+    mkdir(output_dir)
+    mkdir(osp.join(output_dir, 'checkpoints'))
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(cfg.NVIDIA_DEVICE)
     device = torch.device(cfg.DEVICE)
     if cfg.SEED >= 0:
         set_random_seed(cfg.SEED)
 
-    print("Creating model")
+    write_text(sentence="Creating model", fpath=os.path.join(output_dir, 'os.txt'))
     model = ARMNet(cfg)
     model.to(device)
 
+    write_text(sentence="Loading data", fpath=os.path.join(output_dir, 'os.txt'))
     print("Loading data")
     train_loader = build_train_loader(cfg)
     gallery_loader, query_loader = build_test_loader(cfg)
@@ -63,12 +71,14 @@ def main(args):
         assert args.ckpt, "--ckpt must be specified when --resume enabled"
         start_epoch = resume_from_ckpt(args.ckpt, model, optimizer, lr_scheduler) + 1
 
+    write_text(sentence="Creating output folder", fpath=os.path.join(output_dir, 'os.txt'))
     print("Creating output folder")
     output_dir = cfg.OUTPUT_DIR
     mkdir(output_dir)
     path = osp.join(output_dir, "config.yaml")
     with open(path, "w") as f:
         f.write(cfg.dump())
+    write_text(sentence="Full config is saved to {}".format(path), fpath=os.path.join(output_dir, 'os.txt'))
     print(f"Full config is saved to {path}")
     tfboard = None
     if cfg.TF_BOARD:
@@ -77,26 +87,59 @@ def main(args):
         tf_log_path = osp.join(output_dir, "tf_log")
         mkdir(tf_log_path)
         tfboard = SummaryWriter(log_dir=tf_log_path)
+        write_text("TensorBoard files are saved to {}".format(tf_log_path), fpath=osp.join(output_dir, 'os.txt'))
         print(f"TensorBoard files are saved to {tf_log_path}")
 
     print("Start training")
     start_time = time.time()
     for epoch in range(start_epoch, cfg.SOLVER.MAX_EPOCHS):
-        train_one_epoch(cfg, model, optimizer, train_loader, device, epoch, tfboard)
+        train_one_epoch(cfg, model, optimizer, train_loader, device, epoch, tfboard, output_dir)
         lr_scheduler.step()
 
-        if epoch>=9:
-            evaluate_performance(
-                model,epoch,
+        if (epoch + 1) % cfg.EVAL_PERIOD == 0 or epoch == cfg.SOLVER.MAX_EPOCHS - 1:
+
+            ret = evaluate_performance(
+                model,
                 gallery_loader,
                 query_loader,
                 device,
-                use_gt=cfg.EVAL_USE_GT,
+                use_gt=False,
                 use_cache=cfg.EVAL_USE_CACHE,
                 use_cbgm=cfg.EVAL_USE_CBGM,
+                outsys_dir=output_dir
             )
 
-        if epoch>=9:
+            if epoch == cfg.SOLVER.MAX_EPOCHS - 1:
+                write_text(sentence='using GT boxes', fpath=osp.join(output_dir, 'os.txt'))
+                ret_gt = evaluate_performance(
+                    model,
+                    gallery_loader,
+                    query_loader,
+                    device,
+                    use_gt=True,
+                    use_cache=cfg.EVAL_USE_CACHE,
+                    use_cbgm=cfg.EVAL_USE_CBGM,
+                    outsys_dir=output_dir
+                )
+            
+            write_text(sentence=' ', fpath=osp.join(output_dir, 'os.txt'))
+
+            if tfboard:
+                n_iter = (epoch + 1) * len(train_loader)
+                # change n_iter to epoch
+                tfboard.add_scalar("test/mAP", ret['mAP'], epoch)
+                tfboard.add_scalar("test/r1", ret['accs'][0], epoch)
+                tfboard.add_scalar("test/r5", ret['accs'][1], epoch)
+                tfboard.add_scalar("test/r10", ret['accs'][2], epoch)
+
+                if epoch == cfg.SOLVER.MAX_EPOCHS - 1:
+                    tfboard.add_scalar("test_gt/mAP", ret_gt['mAP'], epoch)
+                    tfboard.add_scalar("test_gt/r1", ret_gt['accs'][0], epoch)
+                    tfboard.add_scalar("test_gt/r5", ret_gt['accs'][1], epoch)
+                    tfboard.add_scalar("test_gt/r10", ret_gt['accs'][2], epoch)
+
+        if (epoch + 1) % cfg.CKPT_PERIOD == 0 or epoch == cfg.SOLVER.MAX_EPOCHS - 1:
+            ckpt_dir = osp.join(output_dir, 'checkpoints')
             save_on_master(
                 {
                     "model": model.state_dict(),
@@ -104,13 +147,14 @@ def main(args):
                     "lr_scheduler": lr_scheduler.state_dict(),
                     "epoch": epoch,
                 },
-                osp.join(output_dir, f"epoch_{epoch}.pth"),
+                osp.join(ckpt_dir, f"epoch_{epoch}.pth"),
             )
 
     if tfboard:
         tfboard.close()
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+    write_text("Total training time {}".format(total_time_str), fpath=osp.join(output_dir, 'os.txt'))
     print(f"Total training time {total_time_str}")
 
 

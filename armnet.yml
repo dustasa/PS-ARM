@@ -1,4 +1,4 @@
-name: armnet
+name: armnet2
 channels:
   - pytorch
   - conda-forge

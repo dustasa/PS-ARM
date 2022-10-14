@@ -1,7 +1,7 @@
-OUTPUT_DIR: "./logs/prw_coat"
+OUTPUT_DIR: "./logs/prw_coat_mini"
 INPUT:
   DATASET: "PRW"
-  DATA_ROOT: "/data/aosun/Desktop/code/git-repo/PS-ARM/data/PRW"
+  DATA_ROOT: "/data/aosun/Desktop/code/git-repo/PS-ARM/data/PRW_MINI/PRW_SEG_VOC_MIX"
   BATCH_SIZE_TRAIN: 3
 SOLVER:
   MAX_EPOCHS: 12
