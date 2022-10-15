@@ -2,14 +2,15 @@ import math
 import sys
 import os
 from copy import deepcopy
-
 import torch
 from torch.nn.utils import clip_grad_norm_
 from tqdm import tqdm
-
 from eval_func import eval_detection, eval_search_cuhk, eval_search_prw
 from utils.utils import MetricLogger, SmoothedValue, mkdir, reduce_dict, warmup_lr_scheduler
+from defaults import get_default_cfg
 
+cfg = get_default_cfg()
+output_dir = cfg.OUTPUT_DIR
 
 def to_device(images, targets, device):
     images = [image.to(device) for image in images]
@@ -73,7 +74,7 @@ def train_one_epoch(cfg, model, optimizer, data_loader, device, epoch, tfboard=N
 
 @torch.no_grad()
 def evaluate_performance(
-        model, gallery_loader, query_loader, device, use_gt=False, use_cache=False, use_cbgm=False, outsys_dir=None
+        model, gallery_loader, query_loader, device, use_gt=False, use_cache=False, use_cbgm=False, outsys_dir=output_dir
 ):
     """
     Args:

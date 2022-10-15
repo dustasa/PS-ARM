@@ -1,7 +1,7 @@
 OUTPUT_DIR: "./logs/prw_coat"
 INPUT:
   DATASET: "PRW"
-  DATA_ROOT: "/data/aosun/Desktop/code/git-repo/PS-ARM/data/PRW"
+  DATA_ROOT: "/home/huaqiang/aosun/git-repo/PS-ARM_local/PS-ARM/data/PRW-v16.04.20"
   BATCH_SIZE_TRAIN: 3
 SOLVER:
   MAX_EPOCHS: 12
