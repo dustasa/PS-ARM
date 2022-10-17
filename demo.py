@@ -8,7 +8,7 @@ from PIL import Image
 from torchvision.transforms import functional as F
 
 from defaults import get_default_cfg
-from models.arm_net import ARMNet
+from models.base import BaseNet
 from utils.utils import resume_from_ckpt
 
 
@@ -50,7 +50,7 @@ def main(args):
     device = torch.device(cfg.DEVICE)
 
     print("Creating model")
-    model = ARMNet(cfg)
+    model = BaseNet(cfg)
     model.to(device)
     model.eval()
 

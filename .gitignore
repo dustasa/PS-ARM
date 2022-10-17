@@ -17,3 +17,9 @@ models/learn_maskrcnn/model
 models/mask_rcnn/save_weights/
 .idea
 datasets/__pycache__/
+data/
+exp_cuhk/
+pth/
+utils/__pycache__/
+logs
+configs

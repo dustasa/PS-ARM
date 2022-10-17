@@ -11,20 +11,20 @@ from torchvision.models.detection.transform import GeneralizedRCNNTransform
 from torchvision.ops import MultiScaleRoIAlign
 from torchvision.ops import boxes as box_ops
 
-from models.oim import OIMLoss
+from losses.oim import OIMLoss, LOIMLoss
 from models.resnet import build_resnet
 
 
-class ARMNet(nn.Module):
+class BaseNet(nn.Module):
     def __init__(self, cfg):
-        super(ARMNet, self).__init__()
+        super(BaseNet, self).__init__()
 
         backbone, box_head = build_resnet(name="resnet50", pretrained=True)
 
         anchor_generator = AnchorGenerator(
             sizes=((32, 64, 128, 256, 512),), aspect_ratios=((0.5, 1.0, 2.0),)
         )
-        head = RPNHead(
+        rpn_head = RPNHead(
             in_channels=backbone.out_channels,
             num_anchors=anchor_generator.num_anchors_per_location()[0],
         )
@@ -36,7 +36,7 @@ class ARMNet(nn.Module):
         )
         rpn = RegionProposalNetwork(
             anchor_generator=anchor_generator,
-            head=head,
+            head=rpn_head,
             fg_iou_thresh=cfg.MODEL.RPN.POS_THRESH_TRAIN,
             bg_iou_thresh=cfg.MODEL.RPN.NEG_THRESH_TRAIN,
             batch_size_per_image=cfg.MODEL.RPN.BATCH_SIZE_TRAIN,
@@ -51,16 +51,18 @@ class ARMNet(nn.Module):
         box_roi_pool = MultiScaleRoIAlign(
             featmap_names=["feat_res4"], output_size=14, sampling_ratio=2
         )
-        box_predictor = BBoxRegressor(2048, num_classes=2, bn_neck=cfg.MODEL.ROI_HEAD.BN_NECK)
-        roi_heads = ARMRoIHeads(
+        box_predictor = BBoxPredictor(2048, num_classes=2, bn_neck=cfg.MODEL.ROI_HEAD.BN_NECK)
+        roi_heads = BaseRoIHeads(
             # OIM
             num_pids=cfg.MODEL.LOSS.LUT_SIZE,
             num_cq_size=cfg.MODEL.LOSS.CQ_SIZE,
             oim_momentum=cfg.MODEL.LOSS.OIM_MOMENTUM,
             oim_scalar=cfg.MODEL.LOSS.OIM_SCALAR,
-            # SeqNet
-            faster_rcnn_predictor=faster_rcnn_predictor,
+            oim_type=cfg.MODEL.LOSS.TYPE,
+            oim_eps=cfg.MODEL.LOSS.OIM_EPS,
             reid_head=reid_head,
+            # faster rcnn
+            faster_rcnn_predictor=faster_rcnn_predictor,
             # parent class
             box_roi_pool=box_roi_pool,
             box_head=box_head,
@@ -155,21 +157,29 @@ class ARMNet(nn.Module):
         return losses
 
 
-class ARMRoIHeads(RoIHeads):
+class BaseRoIHeads(RoIHeads):
     def __init__(
         self,
         num_pids,
         num_cq_size,
         oim_momentum,
         oim_scalar,
+        oim_type,
+        oim_eps,
         faster_rcnn_predictor,
         reid_head,
         *args,
         **kwargs
     ):
-        super(ARMRoIHeads, self).__init__(*args, **kwargs)
-        self.embedding_head = NormAwareEmbedding()
-        self.reid_loss = OIMLoss(256, num_pids, num_cq_size, oim_momentum, oim_scalar)
+        super(BaseRoIHeads, self).__init__(*args, **kwargs)
+        self.embedding_head = ReIDEmbedding()
+        # add LOIM type by aosun
+        if oim_type == 'OIM':
+            self.reid_loss = OIMLoss(256, num_pids, num_cq_size, oim_momentum, oim_scalar)
+        if oim_type == 'LOIM':
+            self.reid_loss = LOIMLoss(256, num_pids, num_cq_size, oim_momentum, oim_scalar, oim_eps)
+        self.oim_type = oim_type
+        # add end
         self.faster_rcnn_predictor = faster_rcnn_predictor
         self.reid_head = reid_head
         # rename the method inherited from parent class
@@ -183,10 +193,14 @@ class ARMRoIHeads(RoIHeads):
             image_shapes (List[Tuple[H, W]])
             targets (List[Dict])
         """
+        if targets is not None:
+            for t in targets:
+                assert t["boxes"].dtype.is_floating_point, 'target boxes must of float type'
+                assert t["labels"].dtype == torch.int64, 'target labels must of int64 type'
+
         if self.training:
-            proposals, _, proposal_pid_labels, proposal_reg_targets = self.select_training_samples(
-                proposals, targets
-            )
+            proposals, matched_idxs, labels, regression_targets = \
+                self.select_training_samples(proposals, targets)
 
         # ------------------- Faster R-CNN head ------------------ #
         proposal_features = self.box_roi_pool(features, proposals, image_shapes)
@@ -194,6 +208,10 @@ class ARMRoIHeads(RoIHeads):
         proposal_cls_scores, proposal_regs = self.faster_rcnn_predictor(
             proposal_features["feat_res5"]
         )
+
+        # add by aosun
+        rcnn_features = self.reid_head(proposal_features)
+        class_logits, box_regression = self.box_predictor(rcnn_features['feat_res5'])
 
         if self.training:
             boxes = self.get_boxes(proposal_regs, proposals, image_shapes)
@@ -236,21 +254,40 @@ class ARMRoIHeads(RoIHeads):
         if box_cls_scores.dim() == 0:
             box_cls_scores = box_cls_scores.unsqueeze(0)
 
+        # TODO fix code
         result, losses = [], {}
         if self.training:
-            proposal_labels = [y.clamp(0, 1) for y in proposal_pid_labels]
+            if self.oim_type == 'LOIM':
+                max_iou_list = []
+                # step1. compute IoU between all proposals and all ground-truth boxes
+                # step2. select the maximum ground-truth box for each proposal
+                # step3. (within the LOIM loss) filter out background proposals
+                for batch_index in range(len(proposals)):
+                    box_p = proposals[batch_index]
+                    box_t = targets[batch_index]['boxes']
+                    ious = box_ops.box_iou(box_p, box_t)
+                    ious_max = torch.max(ious, dim=1)[0]
+                    max_iou_list.append(ious_max)
+                ious = torch.cat(max_iou_list, dim=0)
+
+            det_labels = [y.clamp(0, 1) for y in labels]
             box_labels = [y.clamp(0, 1) for y in box_pid_labels]
             losses = detection_losses(
                 proposal_cls_scores,
                 proposal_regs,
-                proposal_labels,
-                proposal_reg_targets,
+                det_labels,
+                regression_targets,
                 box_cls_scores,
                 box_regs,
                 box_labels,
                 box_reg_targets,
             )
-            loss_box_reid = self.reid_loss(box_embeddings, box_pid_labels)
+            if self.oim_type == 'LOIM':
+                ious = torch.clamp(ious, min=0.7)
+                loss_box_reid = self.reid_loss.forward(box_embeddings, box_pid_labels, ious)
+            else:
+                loss_box_reid = self.reid_loss(box_embeddings, box_pid_labels)
+
             losses.update(loss_box_reid=loss_box_reid)
         else:
             # The IoUs of these boxes are higher than that of proposals,
@@ -273,7 +310,10 @@ class ARMRoIHeads(RoIHeads):
             for i in range(num_images):
                 result.append(
                     dict(
-                        boxes=boxes[i], labels=labels[i], scores=scores[i], embeddings=embeddings[i]
+                        boxes=boxes[i],
+                        labels=labels[i],
+                        scores=scores[i],
+                        embeddings=embeddings[i]
                     )
                 )
         return result, losses
@@ -396,14 +436,14 @@ class ARMRoIHeads(RoIHeads):
         return all_boxes, all_scores, all_embeddings, all_labels
 
 
-class NormAwareEmbedding(nn.Module):
+class ReIDEmbedding(nn.Module):
     """
     Implements the Norm-Aware Embedding proposed in
     Chen, Di, et al. "Norm-aware embedding for efficient person search." CVPR 2020.
     """
 
     def __init__(self, featmap_names=["feat_res4", "feat_res5"], in_channels=[1024, 2048], dim=256):
-        super(NormAwareEmbedding, self).__init__()
+        super(ReIDEmbedding, self).__init__()
         self.featmap_names = featmap_names
         self.in_channels = in_channels
         self.dim = dim
@@ -468,7 +508,7 @@ class NormAwareEmbedding(nn.Module):
             return tmp
 
 
-class BBoxRegressor(nn.Module):
+class BBoxPredictor(nn.Module):
     """
     Bounding box regression layer.
     """
@@ -480,7 +520,7 @@ class BBoxRegressor(nn.Module):
             num_classes (int, optional): Defaults to 2 (background and pedestrian).
             bn_neck (bool, optional): Whether to use BN after Linear. Defaults to True.
         """
-        super(BBoxRegressor, self).__init__()
+        super(BBoxPredictor, self).__init__()
         if bn_neck:
             self.bbox_pred = nn.Sequential(
                 nn.Linear(in_channels, 4 * num_classes), nn.BatchNorm1d(4 * num_classes)

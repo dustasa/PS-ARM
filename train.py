@@ -11,7 +11,7 @@ import torch.utils.data
 from datasets import build_test_loader, build_train_loader
 from defaults import get_default_cfg
 from engine import evaluate_performance, train_one_epoch
-from models.arm_net import ARMNet
+from models.base import BaseNet
 from utils.utils import mkdir, resume_from_ckpt, save_on_master, set_random_seed
 from utils.utils import write_text
 
@@ -32,7 +32,7 @@ def main(args):
         set_random_seed(cfg.SEED)
 
     write_text(sentence="Creating model", fpath=os.path.join(output_dir, 'os.txt'))
-    model = ARMNet(cfg)
+    model = BaseNet(cfg)
     model.to(device)
 
     write_text(sentence="Loading data", fpath=os.path.join(output_dir, 'os.txt'))

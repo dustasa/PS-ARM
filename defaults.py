@@ -111,12 +111,15 @@ _C.MODEL.ROI_HEAD.DETECTIONS_PER_IMAGE_TEST = 300
 #                           Loss                           #
 # -------------------------------------------------------- #
 _C.MODEL.LOSS = CN()
+# OIM type ['OIM', 'LOIM']
+_C.MODEL.LOSS.TYPE = 'LOIM'
 # Size of the lookup table in OIM
 _C.MODEL.LOSS.LUT_SIZE = 5532
 # Size of the circular queue in OIM
 _C.MODEL.LOSS.CQ_SIZE = 5000
 _C.MODEL.LOSS.OIM_MOMENTUM = 0.5
 _C.MODEL.LOSS.OIM_SCALAR = 30.0
+_C.MODEL.LOSS.OIM_EPS = 0.1
 
 # -------------------------------------------------------- #
 #                        Evaluation                        #

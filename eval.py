@@ -9,7 +9,7 @@ import torch.utils.data
 from datasets import build_test_loader, build_train_loader
 from defaults import get_default_cfg
 from engine import evaluate_performance, train_one_epoch
-from models.arm_net import ARMNet
+from models.base import BaseNet
 from utils.utils import mkdir, resume_from_ckpt, save_on_master, set_random_seed
 
 
@@ -25,7 +25,7 @@ def main(args):
         set_random_seed(cfg.SEED)
 
     print("Creating model")
-    model = ARMNet(cfg)
+    model = BaseNet(cfg)
     model.to(device)
 
     print("Loading data")
