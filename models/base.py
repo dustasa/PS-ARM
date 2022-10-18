@@ -277,7 +277,7 @@ class BaseRoIHeads(RoIHeads):
                 ious = torch.clamp(ious, min=0.7)
                 loss_box_reid = self.reid_loss.forward(box_embeddings, box_pid_labels, ious)
             else:
-                loss_box_reid = self.reid_loss(box_embeddings, box_pid_labels)
+                loss_box_reid = self.reid_loss.forward(box_embeddings, box_pid_labels)
             losses.update(loss_box_reid=loss_box_reid)
         else:
             # The IoUs of these boxes are higher than that of proposals,
@@ -294,7 +294,7 @@ class BaseRoIHeads(RoIHeads):
                 gt_det=gt_det,
                 cws=cws,
             )
-            # set to original thresh after finishing postprocess
+            # set to original thresh after finishing post process
             self.nms_thresh = orig_thresh
             num_images = len(boxes)
             for i in range(num_images):
@@ -437,7 +437,6 @@ class ReIDEmbedding(nn.Module):
         self.featmap_names = featmap_names
         self.in_channels = in_channels
         self.dim = dim
-
         self.projectors = nn.ModuleDict()
         indv_dims = self._split_embedding_dim()
         for ftname, in_channel, indv_dim in zip(self.featmap_names, self.in_channels, indv_dims):
@@ -502,7 +501,6 @@ class BBoxPredictor(nn.Module):
     """
     Bounding box regression layer.
     """
-
     def __init__(self, in_channels, num_classes=2, bn_neck=True):
         """
         Args:
