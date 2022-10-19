@@ -160,20 +160,20 @@ class BaseNet(nn.Module):
 
 class BaseRoIHeads(RoIHeads):
     def __init__(
-        self,
-        num_pids,
-        num_cq_size,
-        oim_momentum,
-        oim_scalar,
-        oim_type,
-        oim_eps,
-        faster_rcnn_predictor,
-        reid_head,
-        *args,
-        **kwargs
+            self,
+            num_pids,
+            num_cq_size,
+            oim_momentum,
+            oim_scalar,
+            oim_type,
+            oim_eps,
+            faster_rcnn_predictor,
+            reid_head,
+            *args,
+            **kwargs
     ):
         super(BaseRoIHeads, self).__init__(*args, **kwargs)
-        self.embedding_head = NAEEmbedding()
+        self.embedding_head = NormAwareEmbedding()
         # self.embedding_head2 = ReIDEmbedding()
         self.embedding_head2 = ReIDEmbedding(
             featmap_names=['feat_res5'],
@@ -301,12 +301,14 @@ class BaseRoIHeads(RoIHeads):
             if self.oim_type == 'LOIM':
                 ious = torch.clamp(ious, min=0.7)
                 # loss_box_reid = self.reid_loss.forward(box_embeddings, box_pid_labels, ious)
+                # TODO fix bugs
                 # try proposal pid for reidloss compute
                 loss_box_reid = self.reid_loss.forward(embeddings_, proposal_pid_labels, ious)
             else:
-                # loss_box_reid = self.reid_loss.forward(box_embeddings, box_pid_labels)
+                loss_box_reid = self.reid_loss.forward(box_embeddings, box_pid_labels)
+                # TODO fix bugs
                 # try proposal pid for reidloss compute
-                loss_box_reid = self.reid_loss.forward(embeddings_, proposal_pid_labels)
+                # loss_box_reid = self.reid_loss.forward(embeddings_, proposal_pid_labels)
             losses.update(loss_box_reid=loss_box_reid)
         else:
             # The IoUs of these boxes are higher than that of proposals,
@@ -355,15 +357,15 @@ class BaseRoIHeads(RoIHeads):
         return all_boxes
 
     def postprocess_boxes(
-        self,
-        class_logits,
-        box_regression,
-        embeddings,
-        proposals,
-        image_shapes,
-        fcs=None,
-        gt_det=None,
-        cws=True,
+            self,
+            class_logits,
+            box_regression,
+            embeddings,
+            proposals,
+            image_shapes,
+            fcs=None,
+            gt_det=None,
+            cws=True,
     ):
         """
         Similar to RoIHeads.postprocess_detections, but can handle embeddings and implement
@@ -393,7 +395,7 @@ class BaseRoIHeads(RoIHeads):
         all_labels = []
         all_embeddings = []
         for boxes, scores, embeddings, image_shape in zip(
-            pred_boxes, pred_scores, pred_embeddings, image_shapes
+                pred_boxes, pred_scores, pred_embeddings, image_shapes
         ):
             boxes = box_ops.clip_boxes_to_image(boxes, image_shape)
 
@@ -455,14 +457,14 @@ class BaseRoIHeads(RoIHeads):
         return all_boxes, all_scores, all_embeddings, all_labels
 
 
-class NAEEmbedding(nn.Module):
+class NormAwareEmbedding(nn.Module):
     """
     Implements the Norm-Aware Embedding proposed in
     Chen, Di, et al. "Norm-aware embedding for efficient person search." CVPR 2020.
     """
 
     def __init__(self, featmap_names=["feat_res4", "feat_res5"], in_channels=[1024, 2048], dim=256):
-        super(NAEEmbedding, self).__init__()
+        super(NormAwareEmbedding, self).__init__()
         self.featmap_names = featmap_names
         self.in_channels = in_channels
         self.dim = dim
@@ -582,10 +584,13 @@ class ReIDEmbedding(nn.Module):
                 tmp[-i] += 1
             assert sum(tmp) == self.dim
             return tmp
+
+
 class BBoxPredictor(nn.Module):
     """
     Bounding box regression layer.
     """
+
     def __init__(self, in_channels, num_classes=2, bn_neck=True):
         """
         Args:
@@ -617,14 +622,14 @@ class BBoxPredictor(nn.Module):
 
 
 def detection_losses(
-    proposal_cls_scores,
-    proposal_regs,
-    proposal_labels,
-    proposal_reg_targets,
-    box_cls_scores,
-    box_regs,
-    box_labels,
-    box_reg_targets,
+        proposal_cls_scores,
+        proposal_regs,
+        proposal_labels,
+        proposal_reg_targets,
+        box_cls_scores,
+        box_regs,
+        box_labels,
+        box_reg_targets,
 ):
     proposal_labels = torch.cat(proposal_labels, dim=0)
     box_labels = torch.cat(box_labels, dim=0)
