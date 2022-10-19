@@ -45,8 +45,8 @@ class OIMLoss(nn.Module):
         self.num_unlabeled = num_cq_size
         self.momentum = oim_momentum
         self.oim_scalar = oim_scalar
-        self.register_buffer("lut", torch.zeros(self.num_pids, self.num_features))
-        self.register_buffer("cq", torch.zeros(self.num_unlabeled, self.num_features))
+        self.register_buffer("lut", torch.zeros(self.num_pids, self.num_features, dtype=torch.float32))
+        self.register_buffer("cq", torch.zeros(self.num_unlabeled, self.num_features, dtype=torch.float32))
         self.header_cq = 0
 
     def forward(self, inputs, roi_label):
@@ -106,24 +106,21 @@ class LOIMLoss(nn.Module):
         self.momentum = oim_momentum
         self.oim_scalar = oim_scalar
         self.oim_eps = eps  # TODO eps?
-        self.register_buffer("lut", torch.zeros(self.num_pids, self.num_features))
-        self.register_buffer("cq", torch.zeros(self.num_unlabeled, self.num_features))
+        self.register_buffer("lut", torch.zeros(self.num_pids, self.num_features, dtype=torch.float32))
+        self.register_buffer("cq", torch.zeros(self.num_unlabeled, self.num_features, dtype=torch.float32))
         self.header_cq = 0
 
     def forward(self, inputs, roi_label, ious):
         # merge into one batch, background label = 0
         targets = torch.cat(roi_label)
         label = targets - 1  # background label = -1
-
         inds = label >= 0
         label = label[inds]
         ious = ious[inds]
         inputs = inputs[inds.unsqueeze(1).expand_as(inputs)].view(-1, self.num_features)
-
         projected = loim(inputs, label, self.lut, self.cq, self.header_cq, momentum=self.momentum, ious=ious,
                          eps=self.oim_eps)
         projected *= self.oim_scalar
-
         self.header_cq = (self.header_cq + (label >= self.num_pids).long().sum().item()) % self.num_unlabeled
         loss_oim = F.cross_entropy(projected, label, ignore_index=5554)
         return loss_oim

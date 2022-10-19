@@ -12,6 +12,7 @@ from torchvision.ops import MultiScaleRoIAlign
 from torchvision.ops import boxes as box_ops
 
 from losses.oim import OIMLoss, LOIMLoss
+from losses.iou import box_iou, generalized_box_iou, ma_box_iou_t2b
 from models.resnet import build_resnet
 
 
@@ -172,14 +173,23 @@ class BaseRoIHeads(RoIHeads):
         **kwargs
     ):
         super(BaseRoIHeads, self).__init__(*args, **kwargs)
-        self.embedding_head = ReIDEmbedding()
+        self.embedding_head = NAEEmbedding()
+        # self.embedding_head2 = ReIDEmbedding()
+        self.embedding_head2 = ReIDEmbedding(
+            featmap_names=['feat_res5'],
+            in_channels=[2048],
+            dim=256,
+            # norm_type=norm_type,
+        )
         # add LOIM type by aosun
         if oim_type == 'OIM':
             self.reid_loss = OIMLoss(256, num_pids, num_cq_size, oim_momentum, oim_scalar)
         if oim_type == 'LOIM':
-            self.reid_loss = LOIMLoss(256, num_pids, num_cq_size, oim_momentum, oim_scalar, oim_eps)
+            self.reid_loss = LOIMLoss(num_features=256, num_pids=num_pids, num_cq_size=num_cq_size,
+                                      oim_momentum=oim_momentum, oim_scalar=oim_scalar, eps=oim_eps)
         self.oim_type = oim_type
         # add end
+
         self.faster_rcnn_predictor = faster_rcnn_predictor
         self.reid_head = reid_head
         # rename the method inherited from parent class
@@ -193,13 +203,28 @@ class BaseRoIHeads(RoIHeads):
             image_shapes (List[Tuple[H, W]])
             targets (List[Dict])
         """
+        if targets is not None:
+            for t in targets:
+                assert t["boxes"].dtype.is_floating_point, 'target boxes must of float type'
+                assert t["labels"].dtype == torch.int64, 'target labels must of int64 type'
+
+        # if self.training:
+        #     # 划分正负样本，统计对应gt的标签以及边界框回归信息
+        #     proposals, matched_idxs, labels, regression_targets = self.select_training_samples(proposals, targets)
+
         if self.training:
             proposals, _, proposal_pid_labels, proposal_reg_targets = self.select_training_samples(
                 proposals, targets
             )
+        # roi_pooled_features = self.box_roi_pool(features, proposals, image_shapes)
 
         # ------------------- Faster R-CNN head ------------------ #
         proposal_features = self.box_roi_pool(features, proposals, image_shapes)
+
+        # add by aosun
+        rcnn_features = self.reid_head(proposal_features)
+        embeddings_ = self.embedding_head2(rcnn_features)
+
         proposal_features = self.box_head(proposal_features)
         proposal_cls_scores, proposal_regs = self.faster_rcnn_predictor(
             proposal_features["feat_res5"]
@@ -275,9 +300,13 @@ class BaseRoIHeads(RoIHeads):
             )
             if self.oim_type == 'LOIM':
                 ious = torch.clamp(ious, min=0.7)
-                loss_box_reid = self.reid_loss.forward(box_embeddings, box_pid_labels, ious)
+                # loss_box_reid = self.reid_loss.forward(box_embeddings, box_pid_labels, ious)
+                # try proposal pid for reidloss compute
+                loss_box_reid = self.reid_loss.forward(embeddings_, proposal_pid_labels, ious)
             else:
-                loss_box_reid = self.reid_loss.forward(box_embeddings, box_pid_labels)
+                # loss_box_reid = self.reid_loss.forward(box_embeddings, box_pid_labels)
+                # try proposal pid for reidloss compute
+                loss_box_reid = self.reid_loss.forward(embeddings_, proposal_pid_labels)
             losses.update(loss_box_reid=loss_box_reid)
         else:
             # The IoUs of these boxes are higher than that of proposals,
@@ -426,14 +455,14 @@ class BaseRoIHeads(RoIHeads):
         return all_boxes, all_scores, all_embeddings, all_labels
 
 
-class ReIDEmbedding(nn.Module):
+class NAEEmbedding(nn.Module):
     """
     Implements the Norm-Aware Embedding proposed in
     Chen, Di, et al. "Norm-aware embedding for efficient person search." CVPR 2020.
     """
 
     def __init__(self, featmap_names=["feat_res4", "feat_res5"], in_channels=[1024, 2048], dim=256):
-        super(ReIDEmbedding, self).__init__()
+        super(NAEEmbedding, self).__init__()
         self.featmap_names = featmap_names
         self.in_channels = in_channels
         self.dim = dim
@@ -497,6 +526,62 @@ class ReIDEmbedding(nn.Module):
             return tmp
 
 
+class ReIDEmbedding(nn.Module):
+
+    def __init__(self, featmap_names=['feat_res5'], in_channels=[2048], dim=256, norm_type='none'):
+        super(ReIDEmbedding, self).__init__()
+        self.featmap_names = featmap_names
+        self.in_channels = in_channels
+        self.dim = int(dim)
+
+        self.projectors = nn.ModuleDict()
+        indv_dims = self._split_embedding_dim()
+        for ftname, in_channel, indv_dim in zip(self.featmap_names, self.in_channels, indv_dims):
+            indv_dim = int(indv_dim)
+            if norm_type == 'none':
+                proj = nn.Sequential(nn.Linear(in_channel, indv_dim, bias=False), )
+                init.normal_(proj[0].weight, std=0.01)
+
+            if norm_type == 'protonorm':
+                proj = nn.Sequential(nn.Linear(in_channel, indv_dim, bias=False), )
+                init.normal_(proj[0].weight, std=0.01)
+
+            self.projectors[ftname] = proj
+
+    def forward(self, featmaps):
+        '''
+        Arguments:
+            featmaps: OrderedDict[Tensor], and in featmap_names you can choose which
+                      featmaps to use
+        Returns:
+            tensor of size (BatchSize, dim), L2 normalized embeddings.
+        '''
+        outputs = []
+        for k in self.featmap_names:
+            v = featmaps[k]
+            v = self._flatten_fc_input(v)
+            outputs.append(
+                self.projectors[k](v)
+            )
+        return F.normalize(torch.cat(outputs, dim=1))
+
+    def _flatten_fc_input(self, x):
+        if x.ndimension() == 4:
+            assert list(x.shape[2:]) == [1, 1]
+            return x.flatten(start_dim=1)
+        return x  # ndim = 2, (N, d)
+
+    def _split_embedding_dim(self):
+        parts = len(self.in_channels)
+        tmp = [self.dim / parts] * parts
+        if sum(tmp) == self.dim:
+            return tmp
+        else:
+            res = self.dim % parts
+            for i in range(1, res + 1):
+                tmp[-i] += 1
+            assert sum(tmp) == self.dim
+            return tmp
 class BBoxPredictor(nn.Module):
     """
     Bounding box regression layer.

@@ -125,7 +125,7 @@ _C.MODEL.LOSS.OIM_EPS = 0.1
 #                        Evaluation                        #
 # -------------------------------------------------------- #
 # The period to evaluate the model during training
-_C.EVAL_PERIOD = 12
+_C.EVAL_PERIOD = 2
 # Evaluation with GT boxes to verify the upper bound of person search performance
 _C.EVAL_USE_GT = False
 # Fast evaluation with cached features
