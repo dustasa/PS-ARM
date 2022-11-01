@@ -1,0 +1,24 @@
+OUTPUT_DIR: "./logs/1030/gw_simam/4/prw_mini"
+INPUT:
+  DATASET: "PRW"
+  DATA_ROOT: "/data/aosun/Desktop/code/git-repo/PS-ARM/data/PRW_MINI/PRW_SEG_VOC_MIX"
+  BATCH_SIZE_TRAIN: 1
+SOLVER:
+  MAX_EPOCHS: 12
+  BASE_LR: 0.001
+  # attention module
+  ATTENTION_YPE: SiMAM
+  # loss weighting config
+  LW_RPN_REG: 1
+  LW_RPN_CLS: 1
+  LW_PROPOSAL_REG: 1
+  LW_PROPOSAL_CLS: 1
+  LW_BOX_REG: 1
+  LW_BOX_CLS: 1
+  LW_BOX_REID: 1
+MODEL:
+  LOSS:
+    TYPE: 'OIM'
+    LUT_SIZE: 482
+    CQ_SIZE: 500
+DISP_PERIOD: 100

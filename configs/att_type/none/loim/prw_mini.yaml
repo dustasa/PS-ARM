@@ -1,0 +1,15 @@
+OUTPUT_DIR: "./logs/1026/gw/2/prw_mini"
+INPUT:
+  DATASET: "PRW"
+  DATA_ROOT: "/data/aosun/Desktop/code/git-repo/PS-ARM/data/PRW_MINI/PRW_SEG_VOC_MIX"
+  BATCH_SIZE_TRAIN: 1
+SOLVER:
+  MAX_EPOCHS: 12
+  BASE_LR: 0.001
+MODEL:
+  LOSS:
+    TYPE: 'OIM'
+#    OIM_EPS: 0.1
+    LUT_SIZE: 482
+    CQ_SIZE: 500
+DISP_PERIOD: 100
