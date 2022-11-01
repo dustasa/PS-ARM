@@ -22,5 +22,4 @@ exp_cuhk/
 pth/
 utils/__pycache__/
 logs
-configs
 output/
