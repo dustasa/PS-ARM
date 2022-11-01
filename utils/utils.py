@@ -14,6 +14,7 @@ import torch
 import torch.distributed as dist
 from tabulate import tabulate
 import datetime
+from defaults import get_default_cfg
 
 
 # -------------------------------------------------------- #
@@ -116,7 +117,11 @@ class MetricLogger(object):
     def add_meter(self, name, meter):
         self.meters[name] = meter
 
-    def log_every(self, iterable, print_freq, header=None):
+    def log_every(self, iterable, print_freq, header=None, output_dir=None):
+        # cfg = get_default_cfg()
+        # output_dir = cfg.OUTPUT_DIR
+        # if args.cfg_file:
+        #     cfg.merge_from_file(args.cfg_file)
         i = 0
         if not header:
             header = ""
@@ -195,6 +200,9 @@ class MetricLogger(object):
                 header, total_time_str, total_time / len(iterable)
             )
         )
+        write_text("{} Total time: {} ({:.4f} s / it)".format(
+                header, total_time_str, total_time / len(iterable)
+            ), self.txt_dir)
 
 
 def mkdir_if_missing(directory):

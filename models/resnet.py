@@ -14,12 +14,13 @@ import math
 from torch import Tensor
 from torch.nn import init
 from torch.nn.modules.utils import _pair
+from defaults import get_default_cfg
 
 
+# apply by SiMAM: parameter-free attention module
 class SimAM(torch.nn.Module):
     def __init__(self, channels=None, e_lambda=1e-4):
         super(SimAM, self).__init__()
-
         self.activaton = nn.Sigmoid()
         self.e_lambda = e_lambda
 
@@ -34,9 +35,7 @@ class SimAM(torch.nn.Module):
 
     def forward(self, x):
         b, c, h, w = x.size()
-
         n = w * h - 1
-
         x_minus_mu_square = (x - x.mean(dim=[2, 3], keepdim=True)).pow(2)
         y = x_minus_mu_square / (4 * (x_minus_mu_square.sum(dim=[2, 3], keepdim=True) / n + self.e_lambda)) + 0.5
 
@@ -67,6 +66,7 @@ class Flatten(nn.Module):
         return x.view(x.size(0), -1)
 
 
+#  channel attention
 class ChannelGate(nn.Module):
     def __init__(self, gate_channels, reduction_ratio=16, pool_types=['avg', 'max']):
         super(ChannelGate, self).__init__()
@@ -117,6 +117,7 @@ class ChannelPool(nn.Module):
         return torch.cat((torch.max(x, 1)[0].unsqueeze(1), torch.mean(x, 1).unsqueeze(1)), dim=1)
 
 
+#  spatial attention
 class SpatialGate(nn.Module):
     def __init__(self):
         super(SpatialGate, self).__init__()
@@ -243,9 +244,15 @@ class ARM_Mixer(nn.Module):
             num_features=256,
             expansion_factor=3,
             dropout=0.5,
+            att_type='None',
     ):
-        num_patches = check_sizes(image_size, patch_size)
+        num_patches = check_sizes(image_size, patch_size)  # image size: 14X14, patch size: 1X1
         super().__init__()
+
+        # cfg = get_default_cfg()
+        # att_type = cfg.MODEL.ATTENTION.TYPE
+        print(f'in resnet use attention type is {att_type}')
+        self.att_type = att_type
 
         self.mixers = MixerLayer(num_patches, image_size, num_features, expansion_factor, dropout)
         self.simam = SimAM()
@@ -257,21 +264,22 @@ class ARM_Mixer(nn.Module):
         patches = patches.view(BB, -1, CC)
         # patches.shape == (batch_size, num_patches, num_features)
         embedding = self.mixers(patches)
-
         embedding_rearrange = embedding.reshape(BB, CC, HH, WW)
-        embedding_final = embedding_rearrange + self.simam(x) + x
+        if self.att_type == 'SiMAM':
+            embedding_final = embedding_rearrange + self.simam(x) + x
+        # remove simam
+        elif self.att_type == 'None':
+            embedding_final = embedding_rearrange + x
         return embedding_final
 
 
 class Backbone(nn.Sequential):
     def __init__(self, resnet):
         super(Backbone, self).__init__()
-        self.feature1 = nn.Sequential(resnet.conv1,
-                                      resnet.bn1, resnet.relu, resnet.maxpool)
+        self.feature1 = nn.Sequential(resnet.conv1,resnet.bn1, resnet.relu, resnet.maxpool)
         self.layer1 = nn.Sequential(resnet.layer1)
         self.layer2 = nn.Sequential(resnet.layer2)
         self.layer3 = nn.Sequential(resnet.layer3)
-
         self.out_channels = 1024
 
     def forward(self, x):
@@ -284,25 +292,24 @@ class Backbone(nn.Sequential):
 
 
 class Res5Head(nn.Sequential):
-    def __init__(self, resnet):
+    def __init__(self, resnet, att_type):
         super(Res5Head, self).__init__()
+        self.att_type = att_type
+
         self.layer4 = nn.Sequential(resnet.layer4)  # res5
         self.out_channels = [1024, 2048]
-
-        self.mlP_model = ARM_Mixer(in_channels=256, image_size=14, patch_size=1)
-
+        self.mlP_model = ARM_Mixer(in_channels=256, image_size=14, patch_size=1, att_type=att_type)
         self.qconv1 = nn.Conv2d(in_channels=1024, out_channels=256, kernel_size=1)
         self.qconv2 = nn.Conv2d(in_channels=256, out_channels=1024, kernel_size=1)
+
+
 
     def forward(self, x):
         qconv1 = self.qconv1(x)
         x_sc_mlp_feat = self.mlP_model(qconv1)
         qconv2 = self.qconv2(x_sc_mlp_feat)
-
         layer5_feat = self.layer4(qconv2)
-
         x_feat = F.adaptive_max_pool2d(qconv2, 1)
-
         feat = F.adaptive_max_pool2d(layer5_feat, 1)
 
         return OrderedDict([["feat_res4", x_feat], ["feat_res5", feat]])
@@ -322,7 +329,7 @@ class Res5Head(nn.Sequential):
 
     # return Backbone(resnet_model), Res5Head(resnet_model)
 
-def build_resnet(name="resnet50", pretrained=True):
+def build_resnet(name="resnet50", pretrained=True, att_type='None'):
     # resnet = resnet50(pretrained=True)
     resnet = torchvision.models.resnet.__dict__[name](pretrained=pretrained)
 
@@ -331,4 +338,4 @@ def build_resnet(name="resnet50", pretrained=True):
     resnet.bn1.weight.requires_grad_(False)
     resnet.bn1.bias.requires_grad_(False)
 
-    return Backbone(resnet), Res5Head(resnet)
+    return Backbone(resnet), Res5Head(resnet, att_type)

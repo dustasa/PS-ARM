@@ -40,29 +40,33 @@ _C.SOLVER.WARMUP_FACTOR = 1.0 / 1000
 # _C.SOLVER.WARMUP_EPOCHS = 1
 
 # The epoch milestones to decrease the learning rate by GAMMA
-_C.SOLVER.LR_DECAY_MILESTONES =  [8]
+_C.SOLVER.LR_DECAY_MILESTONES = [8]
 _C.SOLVER.GAMMA = 0.1
 
 _C.SOLVER.WEIGHT_DECAY = 0.0005
 _C.SOLVER.SGD_MOMENTUM = 0.9
 
 # Loss weight of RPN regression
-_C.SOLVER.LW_RPN_REG = 1
+_C.SOLVER.LW_RPN_REG = 10
 # Loss weight of RPN classification
 _C.SOLVER.LW_RPN_CLS = 1
 # Loss weight of proposal regression
-_C.SOLVER.LW_PROPOSAL_REG = 10
+_C.SOLVER.LW_PROPOSAL_REG = 1
 # Loss weight of proposal classification
 _C.SOLVER.LW_PROPOSAL_CLS = 1
 # Loss weight of box regression
-_C.SOLVER.LW_BOX_REG = 1
+_C.SOLVER.LW_BOX_REG = 10
+
 # Loss weight of box classification
 _C.SOLVER.LW_BOX_CLS = 1
 # Loss weight of box OIM (i.e. Online Instance Matching)
-_C.SOLVER.LW_BOX_REID = 1
+_C.SOLVER.LW_BOX_REID = 0.1
 
 # Set to negative value to disable gradient clipping
 _C.SOLVER.CLIP_GRADIENTS = 10.0
+
+# Attention type ['SiMAM', 'SE', 'None'], defaults SiMAM
+_C.SOLVER.ATTENTION_YPE = 'None'
 
 # -------------------------------------------------------- #
 #                            RPN                           #
@@ -125,7 +129,7 @@ _C.MODEL.LOSS.OIM_EPS = 0.1
 #                        Evaluation                        #
 # -------------------------------------------------------- #
 # The period to evaluate the model during training
-_C.EVAL_PERIOD = 2
+_C.EVAL_PERIOD = 12
 # Evaluation with GT boxes to verify the upper bound of person search performance
 _C.EVAL_USE_GT = False
 # Fast evaluation with cached features
@@ -146,7 +150,7 @@ _C.TF_BOARD = True
 _C.DEVICE = "cuda"
 _C.NVIDIA_DEVICE = 0
 # Set seed to negative to fully randomize everything
-_C.SEED = -1
+_C.SEED = 10010
 # Directory where output files are written
 _C.OUTPUT_DIR = "./output"
 

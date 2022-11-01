@@ -20,13 +20,17 @@ class BaseNet(nn.Module):
     def __init__(self, cfg):
         super(BaseNet, self).__init__()
 
-        backbone, box_head = build_resnet(name="resnet50", pretrained=True)
+        # add attention type for simam
+        self.att_type = cfg.SOLVER.ATTENTION_YPE
+
+        # box head [1024,2048]
+        backbone, box_head = build_resnet(name="resnet50", pretrained=True, att_type=self.att_type)
 
         anchor_generator = AnchorGenerator(
             sizes=((32, 64, 128, 256, 512),), aspect_ratios=((0.5, 1.0, 2.0),)
         )
         rpn_head = RPNHead(
-            in_channels=backbone.out_channels,
+            in_channels=backbone.out_channels,  # 1024
             num_anchors=anchor_generator.num_anchors_per_location()[0],
         )
         pre_nms_top_n = dict(
@@ -274,6 +278,7 @@ class BaseRoIHeads(RoIHeads):
 
         result, losses = [], {}
         if self.training:
+            # TODO fix LOIM code
             if self.oim_type == 'LOIM':
                 max_iou_list = []
                 # step1. compute IoU between all proposals and all ground-truth boxes
@@ -286,6 +291,7 @@ class BaseRoIHeads(RoIHeads):
                     ious_max = torch.max(ious, dim=1)[0]
                     max_iou_list.append(ious_max)
                 ious = torch.cat(max_iou_list, dim=0)
+            # add end
             proposal_labels = [y.clamp(0, 1) for y in proposal_pid_labels]
             box_labels = [y.clamp(0, 1) for y in box_pid_labels]
             losses = detection_losses(
@@ -300,15 +306,16 @@ class BaseRoIHeads(RoIHeads):
             )
             if self.oim_type == 'LOIM':
                 ious = torch.clamp(ious, min=0.7)
-                # loss_box_reid = self.reid_loss.forward(box_embeddings, box_pid_labels, ious)
+                loss_box_reid = self.reid_loss.forward(box_embeddings, box_pid_labels, ious)
                 # TODO fix bugs
                 # try proposal pid for reidloss compute
-                loss_box_reid = self.reid_loss.forward(embeddings_, proposal_pid_labels, ious)
+                # loss_box_reid = self.reid_loss.forward(embeddings_, proposal_pid_labels, ious)
             else:
                 loss_box_reid = self.reid_loss.forward(box_embeddings, box_pid_labels)
                 # TODO fix bugs
                 # try proposal pid for reidloss compute
                 # loss_box_reid = self.reid_loss.forward(embeddings_, proposal_pid_labels)
+            # loss_box_reid = (loss_box_reid1 + loss_box_reid2)/2
             losses.update(loss_box_reid=loss_box_reid)
         else:
             # The IoUs of these boxes are higher than that of proposals,
@@ -462,7 +469,6 @@ class NormAwareEmbedding(nn.Module):
     Implements the Norm-Aware Embedding proposed in
     Chen, Di, et al. "Norm-aware embedding for efficient person search." CVPR 2020.
     """
-
     def __init__(self, featmap_names=["feat_res4", "feat_res5"], in_channels=[1024, 2048], dim=256):
         super(NormAwareEmbedding, self).__init__()
         self.featmap_names = featmap_names
@@ -529,7 +535,6 @@ class NormAwareEmbedding(nn.Module):
 
 
 class ReIDEmbedding(nn.Module):
-
     def __init__(self, featmap_names=['feat_res5'], in_channels=[2048], dim=256, norm_type='none'):
         super(ReIDEmbedding, self).__init__()
         self.featmap_names = featmap_names

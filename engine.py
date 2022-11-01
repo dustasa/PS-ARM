@@ -35,7 +35,7 @@ def train_one_epoch(cfg, model, optimizer, data_loader, device, epoch, tfboard=N
         warmup_scheduler = warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
 
     for i, (images, targets) in enumerate(
-            metric_logger.log_every(data_loader, cfg.DISP_PERIOD, header)
+            metric_logger.log_every(data_loader, cfg.DISP_PERIOD, header, output_dir=output_dir)
     ):
         images, targets = to_device(images, targets, device)
 
